@@ -12,8 +12,23 @@ DB_DSN = os.environ["DB_DSN"]
 def home():
     return render_template('index.html')
 
-@app.route('/processar_fila', methods=['POST'])
-def processar_fila():
+@app.route('/inscrever', methods=['POST'])
+def inscrever():
+    nome = request.form.get('nome')
+    email = request.form.get('email')
+    tipo = request.form.get('tipo')
+    prioridade = request.form.get('prioridade')
+
+    # Definir valor com base no tipo
+    if tipo == "Ingresso Normal":
+        valor_pago = 300
+    elif tipo == "Ingresso VIP":
+        valor_pago = 800
+    else:
+        valor_pago = 1200
+
+    conn = None
+    cursor = None
     try:
         conn = oracledb.connect(
             user=DB_USER,
@@ -22,7 +37,51 @@ def processar_fila():
         )
         cursor = conn.cursor()
 
-        # Exemplo de bloco PL/SQL com cursor explícito
+        # Primeiro insere o usuário se não existir
+        cursor.execute("""
+            MERGE INTO TB_CP2_USUARIOS u
+            USING (SELECT :nome AS nome_usuario, :email AS email_usuario, :prioridade AS prioridade_usuario FROM dual) src
+            ON (u.email_usuario = src.email_usuario)
+            WHEN NOT MATCHED THEN
+                INSERT (nome_usuario, email_usuario, prioridade_usuario, saldo_usuario)
+                VALUES (src.nome_usuario, src.email_usuario, src.prioridade_usuario, 0)
+        """, {"nome": nome, "email": email, "prioridade": prioridade})
+
+        # Pegar id_usuario
+        cursor.execute("SELECT id_usuario FROM TB_CP2_USUARIOS WHERE email_usuario = :email", {"email": email})
+        id_usuario = cursor.fetchone()[0]
+
+        # Inserir inscrição como WAITLIST
+        cursor.execute("""
+            INSERT INTO TB_CP2_INSCRICOES (id_usuario, id_evento, status_inscricao, valor_pago, tipo_inscricao)
+            VALUES (:id_usuario, 1, 'WAITLIST', :valor, :tipo)
+        """, {"id_usuario": id_usuario, "valor": valor_pago, "tipo": tipo})
+
+        conn.commit()
+        mensagem = f"Inscrição de {nome} realizada com sucesso!"
+    except oracledb.DatabaseError as e:
+        error, = e.args
+        mensagem = f"Erro Oracle: {error.code} - {error.message}"
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+    return render_template('index.html', mensagem=mensagem)
+
+@app.route('/processar_fila', methods=['POST'])
+def processar_fila():
+    conn = None
+    cursor = None
+    try:
+        conn = oracledb.connect(
+            user=DB_USER,
+            password=DB_PASSWORD,
+            dsn=DB_DSN
+        )
+        cursor = conn.cursor()
+
         plsql_block = """
         DECLARE
             CURSOR c_inscricoes IS
@@ -40,8 +99,6 @@ def processar_fila():
                 FETCH c_inscricoes INTO v_id_inscricao, v_id_usuario, v_tipo;
                 EXIT WHEN c_inscricoes%NOTFOUND;
 
-                -- Exemplo de regra de negócio:
-                -- Promover Platinum e VIP se houver vagas
                 IF v_tipo IN ('Ingresso Platinum','Ingresso VIP') THEN
                     UPDATE TB_CP2_INSCRICOES
                     SET status_inscricao = 'CONFIRMADA'
@@ -63,16 +120,14 @@ def processar_fila():
         cursor.execute(plsql_block)
         conn.commit()
         mensagem = "Fila processada com sucesso!"
-
     except oracledb.DatabaseError as e:
         error, = e.args
         mensagem = f"Erro Oracle: {error.code} - {error.message}"
     finally:
-        try:
+        if cursor:
             cursor.close()
+        if conn:
             conn.close()
-        except:
-            pass
 
     return render_template('index.html', mensagem=mensagem)
 
