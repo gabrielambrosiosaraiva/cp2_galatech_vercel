@@ -9,7 +9,7 @@
 <body>
     <div class="container">
         <section class="hero">
-            <h1>🎉 Gala Tech 2026</h1>
+            <h1>Gala Tech 2026</h1>
             <p>O maior evento de inovação, IA, Oracle e Python do ano.</p>
             <p>Últimas vagas abertas para VIP e Platinum.</p>
         </section>
@@ -21,30 +21,36 @@
             <div class="card"><h2>3</h2><p>Áreas VIP</p></div>
         </section>
 
+        {% if mensagem %}
+            <div class="success">{{ mensagem }}</div>
+        {% endif %}
+
         <section class="form-box">
-            <h2>🚀 Garanta sua vaga</h2>
-
-            {% if mensagem %}
-                <div class="success">{{ mensagem }}</div>
-            {% endif %}
-
+            <h2>Garanta sua vaga</h2>
             <form action="/inscrever" method="POST">
                 <input type="text" name="nome" placeholder="Nome completo" required>
                 <input type="email" name="email" placeholder="E-mail" required>
 
-                <select name="tipo">
-                    <option>Ingresso Normal - R$300</option>
-                    <option>Ingresso VIP - R$800</option>
-                    <option>Ingresso Platinum - R$1200</option>
+                <select name="tipo" required>
+                    <option value="Ingresso Normal">Ingresso Normal - R$300</option>
+                    <option value="Ingresso VIP">Ingresso VIP - R$800</option>
+                    <option value="Ingresso Platinum">Ingresso Platinum - R$1200</option>
                 </select>
 
-                <select name="prioridade">
-                    <option>NORMAL</option>
-                    <option>VIP</option>
-                    <option>PLATINUM</option>
+                <select name="prioridade" required>
+                    <option value="1">NORMAL</option>
+                    <option value="2">VIP</option>
+                    <option value="3">PLATINUM</option>
                 </select>
 
                 <button type="submit">Finalizar inscrição</button>
+            </form>
+        </section>
+
+        <section class="form-box">
+            <h2>⚡ Processar Fila de Espera</h2>
+            <form action="/processar_fila" method="POST">
+                <button type="submit">Promover VIP/Platinum da Fila</button>
             </form>
         </section>
     </div>
