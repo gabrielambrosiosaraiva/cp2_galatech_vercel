@@ -1,6 +1,4 @@
 
-
-
 # Grand Tech Gala - Processo Automatizado de Fila de Espera
 
 ## Visão Geral
