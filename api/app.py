@@ -4,7 +4,7 @@ import oracledb
 
 app = Flask(__name__, template_folder="../templates", static_folder="../static")
 
-# Variáveis de ambiente com valores padrão
+
 USUARIO_BD = os.environ.get("DB_USER", "usuario_teste")
 SENHA_BD = os.environ.get("DB_PASSWORD", "senha_teste")
 DSN_BD = os.environ.get("DB_DSN", "localhost/XEPDB1")
@@ -22,11 +22,11 @@ def pagina_inicial():
         conexao = oracledb.connect(user=USUARIO_BD, password=SENHA_BD, dsn=DSN_BD)
         cursor = conexao.cursor()
 
-        # Vagas disponíveis
+       
         cursor.execute("SELECT vagas_disponiveis FROM TB_CP2_EVENTOS WHERE id_evento = 1")
         vagas_disponiveis = cursor.fetchone()[0]
 
-        # Vagas preenchidas
+        
         cursor.execute("""
             SELECT COUNT(*)
             FROM TB_CP2_INSCRICOES
@@ -35,7 +35,7 @@ def pagina_inicial():
         """)
         vagas_preenchidas = cursor.fetchone()[0]
 
-        # Lista de confirmados (paginada)
+       
         cursor.execute(f"""
             SELECT u.nome_usuario, i.tipo_inscricao, TO_CHAR(i.data_inscricao,'DD/MM/YYYY HH24:MI'), u.email_usuario
             FROM TB_CP2_USUARIOS u
@@ -53,7 +53,7 @@ def pagina_inicial():
                 "email_usuario": linha[3]
             })
 
-        # Fila de espera
+       
         cursor.execute("""
             SELECT u.nome_usuario, i.tipo_inscricao, TO_CHAR(i.data_inscricao,'DD/MM/YYYY HH24:MI'), u.email_usuario,
                    ROW_NUMBER() OVER (
@@ -103,7 +103,7 @@ def abrir_vagas():
         conexao = oracledb.connect(user=USUARIO_BD, password=SENHA_BD, dsn=DSN_BD)
         cursor = conexao.cursor()
 
-        # Bloco PL/SQL em português
+        
         bloco_plsql = f"""
         DECLARE
             v_vagas TB_CP2_EVENTOS.vagas_disponiveis%TYPE;
