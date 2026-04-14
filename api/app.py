@@ -2,134 +2,230 @@ from flask import Flask, render_template, request
 import os
 import oracledb
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="../templates", static_folder="../static")
 
-DB_USER = os.environ["DB_USER"]
-DB_PASSWORD = os.environ["DB_PASSWORD"]
-DB_DSN = os.environ["DB_DSN"]
+# Variáveis de ambiente com valores padrão
+USUARIO_BD = os.environ.get("DB_USER", "usuario_teste")
+SENHA_BD = os.environ.get("DB_PASSWORD", "senha_teste")
+DSN_BD = os.environ.get("DB_DSN", "localhost/XEPDB1")
 
 @app.route('/')
-def home():
-    return render_template('index.html')
+def pagina_inicial():
+    pagina = int(request.args.get('page', 1))
+    por_pagina = 10
+    deslocamento = (pagina - 1) * por_pagina
 
-@app.route('/inscrever', methods=['POST'])
-def inscrever():
-    nome = request.form.get('nome')
-    email = request.form.get('email')
-    tipo = request.form.get('tipo')
-    prioridade = request.form.get('prioridade')
+    lista_confirmados, lista_fila = [], []
+    vagas_disponiveis, vagas_preenchidas = 0, 0
 
-    # Definir valor com base no tipo
-    if tipo == "Ingresso Normal":
-        valor_pago = 300
-    elif tipo == "Ingresso VIP":
-        valor_pago = 800
-    else:
-        valor_pago = 1200
-
-    conn = None
-    cursor = None
     try:
-        conn = oracledb.connect(
-            user=DB_USER,
-            password=DB_PASSWORD,
-            dsn=DB_DSN
-        )
-        cursor = conn.cursor()
+        conexao = oracledb.connect(user=USUARIO_BD, password=SENHA_BD, dsn=DSN_BD)
+        cursor = conexao.cursor()
 
-        # Primeiro insere o usuário se não existir
+        # Vagas disponíveis
+        cursor.execute("SELECT vagas_disponiveis FROM TB_CP2_EVENTOS WHERE id_evento = 1")
+        vagas_disponiveis = cursor.fetchone()[0]
+
+        # Vagas preenchidas
         cursor.execute("""
-            MERGE INTO TB_CP2_USUARIOS u
-            USING (SELECT :nome AS nome_usuario, :email AS email_usuario, :prioridade AS prioridade_usuario FROM dual) src
-            ON (u.email_usuario = src.email_usuario)
-            WHEN NOT MATCHED THEN
-                INSERT (nome_usuario, email_usuario, prioridade_usuario, saldo_usuario)
-                VALUES (src.nome_usuario, src.email_usuario, src.prioridade_usuario, 0)
-        """, {"nome": nome, "email": email, "prioridade": prioridade})
+            SELECT COUNT(*)
+            FROM TB_CP2_INSCRICOES
+            WHERE status_inscricao = 'CONFIRMADA'
+              AND id_evento = 1
+        """)
+        vagas_preenchidas = cursor.fetchone()[0]
 
-        # Pegar id_usuario
-        cursor.execute("SELECT id_usuario FROM TB_CP2_USUARIOS WHERE email_usuario = :email", {"email": email})
-        id_usuario = cursor.fetchone()[0]
+        # Lista de confirmados (paginada)
+        cursor.execute(f"""
+            SELECT u.nome_usuario, i.tipo_inscricao, TO_CHAR(i.data_inscricao,'DD/MM/YYYY HH24:MI'), u.email_usuario
+            FROM TB_CP2_USUARIOS u
+            JOIN TB_CP2_INSCRICOES i ON u.id_usuario = i.id_usuario
+            WHERE i.status_inscricao = 'CONFIRMADA'
+              AND i.id_evento = 1
+            ORDER BY i.data_inscricao ASC
+            OFFSET {deslocamento} ROWS FETCH NEXT {por_pagina} ROWS ONLY
+        """)
+        for linha in cursor.fetchall():
+            lista_confirmados.append({
+                "nome_usuario": linha[0],
+                "tipo_inscricao": linha[1],
+                "data_inscricao": linha[2],
+                "email_usuario": linha[3]
+            })
 
-        # Inserir inscrição como WAITLIST
+        # Fila de espera
         cursor.execute("""
-            INSERT INTO TB_CP2_INSCRICOES (id_usuario, id_evento, status_inscricao, valor_pago, tipo_inscricao)
-            VALUES (:id_usuario, 1, 'WAITLIST', :valor, :tipo)
-        """, {"id_usuario": id_usuario, "valor": valor_pago, "tipo": tipo})
-
-        conn.commit()
-        mensagem = f"Inscrição de {nome} realizada com sucesso!"
-    except oracledb.DatabaseError as e:
-        error, = e.args
-        mensagem = f"Erro Oracle: {error.code} - {error.message}"
+            SELECT u.nome_usuario, i.tipo_inscricao, TO_CHAR(i.data_inscricao,'DD/MM/YYYY HH24:MI'), u.email_usuario,
+                   ROW_NUMBER() OVER (
+                       ORDER BY CASE i.tipo_inscricao
+                                   WHEN 'Ingresso Platinum' THEN 1
+                                   WHEN 'Ingresso VIP' THEN 2
+                                   WHEN 'Ingresso Normal' THEN 3
+                                   ELSE 4 END,
+                                i.data_inscricao
+                   ) AS posicao_fila
+            FROM TB_CP2_USUARIOS u
+            JOIN TB_CP2_INSCRICOES i ON u.id_usuario = i.id_usuario
+            WHERE i.status_inscricao = 'WAITLIST'
+              AND i.id_evento = 1
+        """)
+        for linha in cursor.fetchall():
+            lista_fila.append({
+                "nome_usuario": linha[0],
+                "tipo_inscricao": linha[1],
+                "data_inscricao": linha[2],
+                "email_usuario": linha[3],
+                "posicao_fila": linha[4]
+            })
     finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        if cursor: cursor.close()
+        if conexao: conexao.close()
 
-    return render_template('index.html', mensagem=mensagem)
+    total_paginas = (vagas_preenchidas + por_pagina - 1) // por_pagina
 
-@app.route('/processar_fila', methods=['POST'])
-def processar_fila():
-    conn = None
-    cursor = None
+    return render_template('index.html',
+                           confirmados=lista_confirmados,
+                           fila=lista_fila,
+                           vagas=vagas_disponiveis,
+                           preenchidas=vagas_preenchidas,
+                           page=pagina,
+                           total_pages=total_paginas)
+
+@app.route('/abrir_vagas', methods=['POST'])
+def abrir_vagas():
+    quantidade = int(request.form.get('qtd', 0))
+    mensagem = ""
+    lista_confirmados, lista_fila = [], []
+    vagas_disponiveis, vagas_preenchidas = 0, 0
+    pagina, por_pagina, deslocamento = 1, 10, 0
+
     try:
-        conn = oracledb.connect(
-            user=DB_USER,
-            password=DB_PASSWORD,
-            dsn=DB_DSN
-        )
-        cursor = conn.cursor()
+        conexao = oracledb.connect(user=USUARIO_BD, password=SENHA_BD, dsn=DSN_BD)
+        cursor = conexao.cursor()
 
-        plsql_block = """
+        # Bloco PL/SQL em português
+        bloco_plsql = f"""
         DECLARE
-            CURSOR c_inscricoes IS
-                SELECT id_inscricao, id_usuario, tipo_inscricao
-                FROM TB_CP2_INSCRICOES
-                WHERE status_inscricao = 'WAITLIST'
-                ORDER BY id_inscricao;
-
-            v_id_inscricao TB_CP2_INSCRICOES.id_inscricao%TYPE;
-            v_id_usuario   TB_CP2_INSCRICOES.id_usuario%TYPE;
-            v_tipo         TB_CP2_INSCRICOES.tipo_inscricao%TYPE;
+            v_vagas TB_CP2_EVENTOS.vagas_disponiveis%TYPE;
+            CURSOR c_fila IS
+                SELECT i.id_inscricao
+                FROM TB_CP2_INSCRICOES i
+                WHERE i.status_inscricao = 'WAITLIST'
+                  AND i.id_evento = 1
+                ORDER BY CASE i.tipo_inscricao
+                            WHEN 'Ingresso Platinum' THEN 1
+                            WHEN 'Ingresso VIP' THEN 2
+                            WHEN 'Ingresso Normal' THEN 3
+                            ELSE 4
+                         END,
+                         i.data_inscricao ASC
+                FOR UPDATE OF i.status_inscricao;
+            v_id TB_CP2_INSCRICOES.id_inscricao%TYPE;
+            v_contador NUMBER := 0;
         BEGIN
-            OPEN c_inscricoes;
+            SELECT vagas_disponiveis INTO v_vagas
+            FROM TB_CP2_EVENTOS
+            WHERE id_evento = 1
+            FOR UPDATE;
+
+            v_vagas := v_vagas + {quantidade};
+
+            OPEN c_fila;
             LOOP
-                FETCH c_inscricoes INTO v_id_inscricao, v_id_usuario, v_tipo;
-                EXIT WHEN c_inscricoes%NOTFOUND;
+                FETCH c_fila INTO v_id;
+                EXIT WHEN c_fila%NOTFOUND OR v_contador = v_vagas;
 
-                IF v_tipo IN ('Ingresso Platinum','Ingresso VIP') THEN
-                    UPDATE TB_CP2_INSCRICOES
-                    SET status_inscricao = 'CONFIRMADA'
-                    WHERE id_inscricao = v_id_inscricao;
+                UPDATE TB_CP2_INSCRICOES
+                SET status_inscricao = 'CONFIRMADA'
+                WHERE CURRENT OF c_fila;
 
-                    INSERT INTO TB_CP2_LOG_AUDITORIA (id_inscricao, motivo_log)
-                    VALUES (v_id_inscricao, 'Promoção automática da fila de espera');
-                END IF;
+                INSERT INTO TB_CP2_LOG_AUDITORIA (id_inscricao, motivo_log)
+                VALUES (v_id, 'Promoção da fila após abertura de vagas');
+
+                v_contador := v_contador + 1;
             END LOOP;
-            CLOSE c_inscricoes;
+            CLOSE c_fila;
+
+            UPDATE TB_CP2_EVENTOS
+            SET vagas_disponiveis = v_vagas - v_contador
+            WHERE id_evento = 1;
+
             COMMIT;
-        EXCEPTION
-            WHEN OTHERS THEN
-                ROLLBACK;
-                RAISE;
         END;
         """
+        cursor.execute(bloco_plsql)
+        mensagem = f"{quantidade} vagas abertas, {quantidade} processadas (se disponíveis)."
 
-        cursor.execute(plsql_block)
-        conn.commit()
-        mensagem = "Fila processada com sucesso!"
+        # Atualiza listas
+        cursor.execute("SELECT vagas_disponiveis FROM TB_CP2_EVENTOS WHERE id_evento = 1")
+        vagas_disponiveis = cursor.fetchone()[0]
+
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM TB_CP2_INSCRICOES
+            WHERE status_inscricao = 'CONFIRMADA'
+              AND id_evento = 1
+        """)
+        vagas_preenchidas = cursor.fetchone()[0]
+
+        cursor.execute(f"""
+            SELECT u.nome_usuario, i.tipo_inscricao, TO_CHAR(i.data_inscricao,'DD/MM/YYYY HH24:MI'), u.email_usuario
+            FROM TB_CP2_USUARIOS u
+            JOIN TB_CP2_INSCRICOES i ON u.id_usuario = i.id_usuario
+            WHERE i.status_inscricao = 'CONFIRMADA'
+              AND id_evento = 1
+            ORDER BY i.data_inscricao ASC
+            OFFSET {deslocamento} ROWS FETCH NEXT {por_pagina} ROWS ONLY
+        """)
+        for linha in cursor.fetchall():
+            lista_confirmados.append({
+                "nome_usuario": linha[0],
+                "tipo_inscricao": linha[1],
+                "data_inscricao": linha[2],
+                "email_usuario": linha[3]
+            })
+
+        cursor.execute("""
+            SELECT u.nome_usuario, i.tipo_inscricao, TO_CHAR(i.data_inscricao,'DD/MM/YYYY HH24:MI'), u.email_usuario,
+                   ROW_NUMBER() OVER (
+                       ORDER BY CASE i.tipo_inscricao
+                                   WHEN 'Ingresso Platinum' THEN 1
+                                   WHEN 'Ingresso VIP' THEN 2
+                                   WHEN 'Ingresso Normal' THEN 3
+                                   ELSE 4 END,
+                                i.data_inscricao
+                   ) AS posicao_fila
+            FROM TB_CP2_USUARIOS u
+            JOIN TB_CP2_INSCRICOES i ON u.id_usuario = i.id_usuario
+            WHERE i.status_inscricao = 'WAITLIST'
+              AND id_evento = 1
+        """)
+        for linha in cursor.fetchall():
+            lista_fila.append({
+                "nome_usuario": linha[0],
+                "tipo_inscricao": linha[1],
+                "data_inscricao": linha[2],
+                "email_usuario": linha[3],
+                "posicao_fila": linha[4]
+            })
+
     except oracledb.DatabaseError as e:
-        error, = e.args
-        mensagem = f"Erro Oracle: {error.code} - {error.message}"
+        erro, = e.args
+        mensagem = f"Erro Oracle: {erro.code} - {erro.message}"
     finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        if cursor: cursor.close()
+        if conexao: conexao.close()
 
-    return render_template('index.html', mensagem=mensagem)
+    total_paginas = (vagas_preenchidas + por_pagina - 1) // por_pagina
+
+    return render_template('index.html',
+                           confirmados=lista_confirmados,
+                           fila=lista_fila,
+                           vagas=vagas_disponiveis,
+                           preenchidas=vagas_preenchidas,
+                           mensagem=mensagem,
+                           page=pagina,
+                           total_pages=total_paginas)
 
 if __name__ == '__main__':
     app.run(debug=True)

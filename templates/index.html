@@ -2,57 +2,72 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gala Tech 2026</title>
+    <title>Grand Tech Gala - Fila</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <div class="container">
-        <section class="hero">
-            <h1>Gala Tech 2026</h1>
-            <p>O maior evento de inovação, IA, Oracle e Python do ano.</p>
-            <p>Últimas vagas abertas para VIP e Platinum.</p>
-        </section>
+<div class="container">
+    <h1>Grand Tech Gala</h1>
+    <p>Gerenciamento Inteligente da Fila de Espera</p>
 
-        <section class="metrics">
-            <div class="card"><h2>200</h2><p>Vagas Totais</p></div>
-            <div class="card"><h2>4</h2><p>Últimas Vagas</p></div>
-            <div class="card"><h2>15+</h2><p>Palestrantes</p></div>
-            <div class="card"><h2>3</h2><p>Áreas VIP</p></div>
-        </section>
+    {% if mensagem %}
+        <div class="success">{{ mensagem }}</div>
+    {% endif %}
 
-        {% if mensagem %}
-            <div class="success">{{ mensagem }}</div>
-        {% endif %}
+    
+    <section class="form-box">
+        <h2>Abrir Vagas</h2>
+        <p>Vagas disponíveis: {{ vagas }}</p>
+        <p>Vagas preenchidas: {{ preenchidas }}</p>
+        <form action="/abrir_vagas" method="POST">
+            <input type="number" name="qtd" placeholder="Quantidade de vagas" required>
+            <button type="submit">Abrir vagas</button>
+        </form>
+    </section>
 
-        <section class="form-box">
-            <h2>Garanta sua vaga</h2>
-            <form action="/inscrever" method="POST">
-                <input type="text" name="nome" placeholder="Nome completo" required>
-                <input type="email" name="email" placeholder="E-mail" required>
+    
+    <section class="form-box">
+        <h2>Inscrições Confirmadas</h2>
+        <table>
+            <tr><th>Nome</th><th>Email</th><th>Tipo</th><th>Data</th></tr>
+            {% for c in confirmados %}
+            <tr>
+                <td>{{ c.nome_usuario }}</td>
+                <td>{{ c.email_usuario }}</td>
+                <td>{{ c.tipo_inscricao }}</td>
+                <td>{{ c.data_inscricao }}</td>
+            </tr>
+            {% endfor %}
+        </table>
 
-                <select name="tipo" required>
-                    <option value="Ingresso Normal">Ingresso Normal - R$300</option>
-                    <option value="Ingresso VIP">Ingresso VIP - R$800</option>
-                    <option value="Ingresso Platinum">Ingresso Platinum - R$1200</option>
-                </select>
+        
+        <div class="pagination">
+            {% if page > 1 %}
+                <a href="/?page={{ page - 1 }}">Anterior</a>
+            {% endif %}
+            <span>Página {{ page }} de {{ total_pages }}</span>
+            {% if page < total_pages %}
+                <a href="/?page={{ page + 1 }}">Próxima</a>
+            {% endif %}
+        </div>
+    </section>
 
-                <select name="prioridade" required>
-                    <option value="1">NORMAL</option>
-                    <option value="2">VIP</option>
-                    <option value="3">PLATINUM</option>
-                </select>
-
-                <button type="submit">Finalizar inscrição</button>
-            </form>
-        </section>
-
-        <section class="form-box">
-            <h2>⚡ Processar Fila de Espera</h2>
-            <form action="/processar_fila" method="POST">
-                <button type="submit">Promover VIP/Platinum da Fila</button>
-            </form>
-        </section>
-    </div>
+    
+    <section class="form-box">
+        <h2>Fila de Espera</h2>
+        <table>
+            <tr><th>Posição</th><th>Nome</th><th>Email</th><th>Tipo</th><th>Data</th></tr>
+            {% for f in fila %}
+            <tr>
+                <td>{{ f.posicao_fila }}</td>
+                <td>{{ f.nome_usuario }}</td>
+                <td>{{ f.email_usuario }}</td>
+                <td>{{ f.tipo_inscricao }}</td>
+                <td>{{ f.data_inscricao }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </section>
+</div>
 </body>
 </html>
